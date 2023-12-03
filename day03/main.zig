@@ -7,6 +7,70 @@ const Schematic = struct {
     rows: usize,
     cols: usize,
 
+    const NeighborIterator = struct {
+        cur_row: usize,
+        start_row: usize,
+        end_row: usize,
+
+        cur_col: usize,
+        start_col: usize,
+        end_col: usize,
+
+        fn init(row: usize, col: usize, schematic: *const Self) @This() {
+            var start_row = row;
+            var end_row = row;
+
+            var start_col = col;
+            var end_col = col;
+
+            if (start_row > 0) {
+                start_row -= 1;
+            }
+
+            if (end_row < schematic.rows - 1) {
+                end_row += 1;
+            }
+
+            if (start_col > 0) {
+                start_col -= 1;
+            }
+
+            if (end_col < schematic.cols - 1) {
+                end_col += 1;
+            }
+
+            return @This(){
+                .cur_row = start_row,
+                .start_row = start_row,
+                .end_row = end_row,
+                .cur_col = start_col,
+                .start_col = start_col,
+                .end_col = end_col,
+            };
+        }
+
+        pub fn next(self: *@This()) ?struct { row: usize, col: usize } {
+            if (self.cur_row > self.end_row) return null;
+
+            const row = self.cur_row;
+            const col = self.cur_col;
+
+            self.cur_col += 1;
+            if (self.cur_col > self.end_col) {
+                self.cur_col = self.start_col;
+                self.cur_row += 1;
+            }
+
+            return .{ .row = row, .col = col };
+        }
+    };
+
+    pub fn neighbors(self: *const Self, row: usize, col: usize) NeighborIterator {
+        std.debug.assert(row < self.rows);
+        std.debug.assert(col < self.cols);
+        return NeighborIterator.init(row, col, self);
+    }
+
     pub fn init(data: []const u8) Schematic {
         var cols: usize = 0;
         var rows: usize = 0;
@@ -43,29 +107,71 @@ const Schematic = struct {
         return (ch != '.') and !std.ascii.isDigit(ch);
     }
 
-    pub fn hasNearbySymbol(self: *const Self, row: usize, col: usize) bool {
+    pub fn isGear(self: *const Self, row: usize, col: usize) bool {
+        if (self.charAt(row, col) != '*') return false;
+        var adjacent_count: usize = 0;
         if (row > 0) {
-            if (col > 0 and isSymbol(self.charAt(row - 1, col - 1))) return true;
-            if (isSymbol(self.charAt(row - 1, col))) return true;
-            if (col < self.cols - 1 and isSymbol(self.charAt(row - 1, col + 1))) return true;
+            const digits = [_]bool{
+                (col > 0 and std.ascii.isDigit(self.charAt(row - 1, col - 1))),
+                (std.ascii.isDigit((self.charAt(row - 1, col)))),
+                (col < self.cols - 1 and std.ascii.isDigit(self.charAt(row - 1, col + 1))),
+            };
+
+            if (digits[0] and digits[1] and digits[2]) {
+                adjacent_count += 1;
+            } else if (digits[0] and digits[1]) {
+                adjacent_count += 1;
+            } else if (digits[1] and digits[2]) {
+                adjacent_count += 1;
+            } else if (digits[0] and digits[2]) {
+                adjacent_count += 2;
+            } else if (digits[0] or digits[1] or digits[2]) {
+                adjacent_count += 1;
+            }
         }
 
-        if (col > 0 and isSymbol(self.charAt(row, col - 1))) return true;
-        if (col < self.cols - 1 and isSymbol(self.charAt(row, col + 1))) return true;
+        if (col > 0 and std.ascii.isDigit(self.charAt(row, col - 1))) {
+            adjacent_count += 1;
+        }
+
+        if (col < self.cols - 1 and std.ascii.isDigit(self.charAt(row, col + 1))) {
+            adjacent_count += 1;
+        }
 
         if (row < self.rows - 1) {
-            if (col > 0 and isSymbol(self.charAt(row + 1, col - 1))) return true;
-            if (isSymbol(self.charAt(row + 1, col))) return true;
-            if (col < self.cols - 1 and isSymbol(self.charAt(row + 1, col + 1))) return true;
+            const digits = [_]bool{
+                (col > 0 and std.ascii.isDigit(self.charAt(row + 1, col - 1))),
+                (std.ascii.isDigit(self.charAt(row + 1, col))),
+                (col < self.cols - 1 and std.ascii.isDigit(self.charAt(row + 1, col + 1))),
+            };
+
+            if (digits[0] and digits[1] and digits[2]) {
+                adjacent_count += 1;
+            } else if (digits[0] and digits[1]) {
+                adjacent_count += 1;
+            } else if (digits[1] and digits[2]) {
+                adjacent_count += 1;
+            } else if (digits[0] and digits[2]) {
+                adjacent_count += 2;
+            } else if (digits[0] or digits[1] or digits[2]) {
+                adjacent_count += 1;
+            }
         }
 
+        return (adjacent_count == 2);
+    }
+
+    pub fn hasNearbySymbol(self: *const Self, row: usize, col: usize) bool {
+        var iter = self.neighbors(row, col);
+        while (iter.next()) |pos| {
+            if (isSymbol(self.charAt(pos.row, pos.col))) return true;
+        }
         return false;
     }
 };
 
-fn part_1(input: []const u8) usize {
+fn part_1(schematic: *const Schematic) usize {
     var result: usize = 0;
-    const schematic = Schematic.init(input);
     for (0..schematic.rows) |row| {
         var value: usize = 0;
         var nearby_symbol = false;
@@ -95,10 +201,77 @@ fn part_1(input: []const u8) usize {
     return result;
 }
 
+fn part_2(comptime N: usize, schematic: *const Schematic) usize {
+    // Prime the set of gear ratios with 1 for positions that contain gears.
+    var gear_ratios: [N]usize = [_]usize{0} ** N;
+    for (0..schematic.rows) |row| {
+        for (0..schematic.cols) |col| {
+            if (schematic.isGear(row, col)) {
+                const idx = row * schematic.cols + col;
+                gear_ratios[idx] = 1;
+            }
+        }
+    }
+
+    for (0..schematic.rows) |row| {
+        var value: usize = 0;
+        var adjacent_gear_map: [N]bool = [_]bool{false} ** N;
+        for (0..schematic.cols) |col| {
+            const ch = schematic.charAt(row, col);
+            if (std.ascii.isDigit(ch)) {
+                value *= 10;
+                value += ch - '0';
+
+                var iter = schematic.neighbors(row, col);
+                while (iter.next()) |pos| {
+                    const idx = pos.row * schematic.cols + pos.col;
+                    adjacent_gear_map[idx] = (gear_ratios[idx] != 0);
+                }
+                continue;
+            }
+
+            if (value == 0) continue;
+
+            for (0..adjacent_gear_map.len) |idx| {
+                if (adjacent_gear_map[idx]) {
+                    gear_ratios[idx] *= value;
+                }
+            }
+
+            // Reset tracking data.
+            value = 0;
+            adjacent_gear_map = [_]bool{false} ** N;
+        }
+
+        if (value > 0) {
+            // Line ended in a digit.
+            for (0..adjacent_gear_map.len) |idx| {
+                if (adjacent_gear_map[idx]) {
+                    gear_ratios[idx] *= value;
+                }
+            }
+        }
+    }
+
+    var result: usize = 0;
+    for (0..gear_ratios.len) |idx| {
+        result += gear_ratios[idx];
+    }
+
+    return result;
+}
+
 pub fn main() !void {
     const INPUT = @embedFile("./input.txt");
-    const result = part_1(INPUT);
-    std.debug.print("part 1 result: {}\n", .{result});
+    const schematic = Schematic.init(INPUT);
+    {
+        const result = part_1(&schematic);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = part_2(INPUT.len, &schematic);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
@@ -117,5 +290,11 @@ const EXAMPLE_INPUT =
 ;
 
 test "part 1 example input" {
-    try testing.expectEqual(comptime part_1(EXAMPLE_INPUT), 4361);
+    const schematic = comptime Schematic.init(EXAMPLE_INPUT);
+    try testing.expectEqual(part_1(&schematic), 4361);
+}
+
+test "part 2 example input" {
+    const schematic = comptime Schematic.init(EXAMPLE_INPUT);
+    try testing.expectEqual(part_2(EXAMPLE_INPUT.len, &schematic), 467835);
 }
