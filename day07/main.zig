@@ -1,16 +1,24 @@
 const std = @import("std");
 
 fn part_1(comptime input: []const u8) !usize {
+    return try solve(input, false);
+}
+
+fn part_2(comptime input: []const u8) !usize {
+    return try solve(input, true);
+}
+
+fn solve(comptime input: []const u8, jokers_wild: bool) !usize {
     var hands: [1000]Hand = undefined;
     var hand_iter = std.mem.tokenizeSequence(u8, input, "\n");
     var hand_idx: usize = 0;
     while (hand_iter.next()) |hand_str| {
         std.debug.assert(hand_idx < hands.len);
-        hands[hand_idx] = try Hand.parse(hand_str);
+        hands[hand_idx] = try Hand.parse(hand_str, jokers_wild);
         hand_idx += 1;
     }
 
-    std.sort.insertion(Hand, hands[0..hand_idx], {}, Hand.lessThan);
+    std.sort.insertion(Hand, hands[0..hand_idx], false, Hand.lessThan);
 
     var score: usize = 0;
     for (hands[0..hand_idx], 0..) |hand, idx| {
@@ -32,8 +40,8 @@ const Hand = struct {
         FourOfAKind,
         FiveOfAKind,
 
-        pub fn get(hand: []const u8) !@This() {
-            const counts = try cardCounts(hand);
+        pub fn get(hand: []const u8, jokers_wild: bool) !@This() {
+            const counts = try cardCounts(hand, jokers_wild);
             if (isFiveOfAKind(&counts)) return .FiveOfAKind;
             if (isFourOfAKind(&counts)) return .FourOfAKind;
             if (isFullHouse(&counts)) return .FullHouse;
@@ -44,15 +52,18 @@ const Hand = struct {
         }
 
         fn isFiveOfAKind(counts: *const [SUIT_COUNT]usize) bool {
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count == 5) return true;
                 if (count != 0) return false;
             }
-            unreachable;
+            std.debug.assert(counts[0] != 0);
+            return false;
         }
 
         fn isFourOfAKind(counts: *const [SUIT_COUNT]usize) bool {
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count == 4) return true;
                 if (count != 1 and count != 0) return false;
             }
@@ -60,14 +71,16 @@ const Hand = struct {
         }
 
         fn isFullHouse(counts: *const [SUIT_COUNT]usize) bool {
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count == 1 or count == 4) return false;
             }
             return true;
         }
 
         fn isThreeOfAKind(counts: *const [SUIT_COUNT]usize) bool {
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count == 3) return true;
             }
             return false;
@@ -75,7 +88,8 @@ const Hand = struct {
 
         fn isTwoPair(counts: *const [SUIT_COUNT]usize) bool {
             var pair_count: usize = 0;
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count > 2) return false;
                 if (count == 2) pair_count += 1;
             }
@@ -84,27 +98,29 @@ const Hand = struct {
 
         fn isOnePair(counts: *const [SUIT_COUNT]usize) bool {
             var pair_count: usize = 0;
-            for (counts) |count| {
+            for (1..SUIT_COUNT) |idx| {
+                const count = counts[idx];
                 if (count > 3) return false;
                 if (count == 2) pair_count += 1;
             }
             return pair_count == 1;
         }
 
-        fn cardCounts(hand: []const u8) ![SUIT_COUNT]usize {
+        fn cardCounts(hand: []const u8, jokers_wild: bool) ![SUIT_COUNT]usize {
             std.debug.assert(hand.len == 5);
             var counts: [SUIT_COUNT]usize = [_]usize{0} ** SUIT_COUNT;
             for (hand) |ch| {
-                const val = try cardValue(ch);
+                const val = try cardValue(ch, jokers_wild);
                 counts[val] += 1;
             }
             return counts;
         }
 
-        fn cardValue(ch: u8) !usize {
+        fn cardValue(ch: u8, jokers_wild: bool) !usize {
             if (ch < '1') return error.Unexpected;
             if (ch <= '9') return ch - '0';
             if (ch == 'T') return 10;
+            if (ch == 'J' and jokers_wild) return 0;
             if (ch == 'J') return 11;
             if (ch == 'Q') return 12;
             if (ch == 'K') return 13;
@@ -117,13 +133,13 @@ const Hand = struct {
     bid: usize,
     type: Type,
 
-    pub fn parse(hand_str: []const u8) !Hand {
+    pub fn parse(hand_str: []const u8, jokers_wild: bool) !Hand {
         var hand_iter = std.mem.tokenizeSequence(u8, hand_str, " ");
 
         var card_str = hand_iter.next() orelse return error.Unexpected;
         if (card_str.len != 5) return error.Unexpected;
         for (card_str) |ch| {
-            _ = try Type.cardValue(ch);
+            _ = try Type.cardValue(ch, jokers_wild);
         }
 
         var bid_str = hand_iter.next() orelse return error.Unexpected;
@@ -132,17 +148,17 @@ const Hand = struct {
         return Self{
             .cards = card_str,
             .bid = try std.fmt.parseInt(usize, bid_str, 10),
-            .type = try Type.get(card_str),
+            .type = try Type.get(card_str, jokers_wild),
         };
     }
 
-    pub fn lessThan(context: void, lhs: Hand, rhs: Hand) bool {
-        _ = context;
+    pub fn lessThan(context: bool, lhs: Hand, rhs: Hand) bool {
+        const jokers_wild = context;
         if (@intFromEnum(lhs.type) < @intFromEnum(rhs.type)) return true;
         if (@intFromEnum(rhs.type) < @intFromEnum(lhs.type)) return false;
         for (0..5) |idx| {
-            const lhs_value = Type.cardValue(lhs.cards[idx]) catch unreachable;
-            const rhs_value = Type.cardValue(rhs.cards[idx]) catch unreachable;
+            const lhs_value = Type.cardValue(lhs.cards[idx], jokers_wild) catch unreachable;
+            const rhs_value = Type.cardValue(rhs.cards[idx], jokers_wild) catch unreachable;
             if (lhs_value < rhs_value) return true;
             if (rhs_value < lhs_value) return false;
         }
@@ -152,8 +168,14 @@ const Hand = struct {
 
 pub fn main() !void {
     const input = @embedFile("./input.txt");
-    const result = try part_1(input);
-    std.debug.print("part 1 result: {}\n", .{result});
+    {
+        const result = try part_1(input);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = try part_2(input);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
@@ -168,4 +190,8 @@ const EXAMPLE_INPUT =
 
 test "part 1 example input" {
     try testing.expectEqual(part_1(EXAMPLE_INPUT), 6440);
+}
+
+test "part 2 example input" {
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 5905);
 }
