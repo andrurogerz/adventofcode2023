@@ -18,7 +18,7 @@ fn solve(comptime input: []const u8, jokers_wild: bool) !usize {
         hand_idx += 1;
     }
 
-    std.sort.insertion(Hand, hands[0..hand_idx], false, Hand.lessThan);
+    std.sort.insertion(Hand, hands[0..hand_idx], jokers_wild, Hand.lessThan);
 
     var score: usize = 0;
     for (hands[0..hand_idx], 0..) |hand, idx| {
@@ -48,62 +48,91 @@ const Hand = struct {
             if (isThreeOfAKind(&counts)) return .ThreeOfAKind;
             if (isTwoPair(&counts)) return .TwoPair;
             if (isOnePair(&counts)) return .OnePair;
+            std.debug.assert(counts[0] == 0); // no jokers
             return .HighCard;
         }
 
         fn isFiveOfAKind(counts: *const [SUIT_COUNT]usize) bool {
+            const joker_count = counts[0];
             for (1..SUIT_COUNT) |idx| {
                 const count = counts[idx];
-                if (count == 5) return true;
-                if (count != 0) return false;
+                if (count + joker_count >= 5) return true;
             }
-            std.debug.assert(counts[0] != 0);
             return false;
         }
 
         fn isFourOfAKind(counts: *const [SUIT_COUNT]usize) bool {
+            const joker_count = counts[0];
+            std.debug.assert(joker_count <= 3); // otherwise this hand is five of a kind
             for (1..SUIT_COUNT) |idx| {
                 const count = counts[idx];
-                if (count == 4) return true;
-                if (count != 1 and count != 0) return false;
+                std.debug.assert(count <= 4); // otheriwise this hand is five of a kind
+                if (count + joker_count >= 4) return true;
             }
             return false;
         }
 
         fn isFullHouse(counts: *const [SUIT_COUNT]usize) bool {
-            for (1..SUIT_COUNT) |idx| {
-                const count = counts[idx];
-                if (count == 1 or count == 4) return false;
+            const hand_counts = handCounts(counts);
+            const joker_count = counts[0];
+            std.debug.assert(joker_count <= 2); // otherwise this hand is at least four of a kind
+            std.debug.assert(hand_counts[4] == 0);
+            std.debug.assert(hand_counts[5] == 0);
+
+            if (hand_counts[2] == 1 and hand_counts[3] == 1) return true;
+
+            if (joker_count > 0) {
+                if (hand_counts[2] == 2) return true;
+                if (hand_counts[3] == 1) return true;
             }
-            return true;
+
+            if (joker_count > 1) {
+                if (hand_counts[2] == 1) return true;
+            }
+
+            return false;
         }
 
         fn isThreeOfAKind(counts: *const [SUIT_COUNT]usize) bool {
+            const joker_count = counts[0];
+            std.debug.assert(joker_count <= 2); // otherwise this hand is at least four of a kind
             for (1..SUIT_COUNT) |idx| {
                 const count = counts[idx];
-                if (count == 3) return true;
+                std.debug.assert(count <= 3); // otherwise this hand is at least four of a kind
+                if (count + joker_count == 3) return true;
             }
             return false;
         }
 
         fn isTwoPair(counts: *const [SUIT_COUNT]usize) bool {
-            var pair_count: usize = 0;
-            for (1..SUIT_COUNT) |idx| {
-                const count = counts[idx];
-                if (count > 2) return false;
-                if (count == 2) pair_count += 1;
+            const hand_counts = handCounts(counts);
+            std.debug.assert(hand_counts[3] == 0);
+            std.debug.assert(hand_counts[4] == 0);
+            std.debug.assert(hand_counts[5] == 0);
+
+            if (hand_counts[2] == 2) return true;
+
+            const joker_count = counts[0];
+            std.debug.assert(joker_count <= 1); //otherwise this hand is at least three of a kind
+
+            if (joker_count > 0) {
+                // If there is a joker and at least one pair, then this hand will count as three of
+                // a kind rather than two pair so we should never get here
+                std.debug.assert(hand_counts[2] == 0);
             }
-            return pair_count == 2;
+
+            return false;
         }
 
         fn isOnePair(counts: *const [SUIT_COUNT]usize) bool {
-            var pair_count: usize = 0;
+            const joker_count = counts[0];
+            std.debug.assert(joker_count <= 1); //otherwise this hand is at least three of a kind
             for (1..SUIT_COUNT) |idx| {
                 const count = counts[idx];
-                if (count > 3) return false;
-                if (count == 2) pair_count += 1;
+                std.debug.assert(count <= 2);
+                if (count + joker_count >= 2) return true;
             }
-            return pair_count == 1;
+            return false;
         }
 
         fn cardCounts(hand: []const u8, jokers_wild: bool) ![SUIT_COUNT]usize {
@@ -112,6 +141,16 @@ const Hand = struct {
             for (hand) |ch| {
                 const val = try cardValue(ch, jokers_wild);
                 counts[val] += 1;
+            }
+            return counts;
+        }
+
+        fn handCounts(card_counts: *const [SUIT_COUNT]usize) [6]usize {
+            var counts: [6]usize = [_]usize{0} ** 6;
+            for (1..SUIT_COUNT) |idx| {
+                const count = card_counts[idx];
+                std.debug.assert(count < counts.len);
+                counts[count] += 1;
             }
             return counts;
         }
@@ -154,6 +193,8 @@ const Hand = struct {
 
     pub fn lessThan(context: bool, lhs: Hand, rhs: Hand) bool {
         const jokers_wild = context;
+        std.debug.assert(lhs.cards.len == 5);
+        std.debug.assert(rhs.cards.len == 5);
         if (@intFromEnum(lhs.type) < @intFromEnum(rhs.type)) return true;
         if (@intFromEnum(rhs.type) < @intFromEnum(lhs.type)) return false;
         for (0..5) |idx| {
@@ -162,7 +203,7 @@ const Hand = struct {
             if (lhs_value < rhs_value) return true;
             if (rhs_value < lhs_value) return false;
         }
-        unreachable;
+        unreachable; // Cards are equal, shoul we ever get here?
     }
 };
 
