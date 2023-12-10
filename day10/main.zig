@@ -2,15 +2,43 @@ const std = @import("std");
 
 fn part_1(comptime input: []const u8) !i128 {
     const grid = PipeGrid.init(input);
-    for (0..grid.rows) |row| {
-        for (0..grid.cols) |col| {
-            std.debug.print("{c}", .{grid.tileAt(.{ .col = col, .row = row })});
+
+    var move_count: usize = 0;
+    var prev_pos: ?PipeGrid.Position = null;
+    var cur_pos = grid.start_pos;
+    var connections = grid.connectionsStart();
+
+    while (move_count < std.math.maxInt(u24)) {
+        var next: PipeGrid.Position = PipeGrid.Position.INVALID;
+        for (connections) |connection| {
+            std.debug.assert(connection != null);
+            if (prev_pos) |prev| {
+                if (connection.?.row == prev.row and connection.?.col == prev.col) {
+                    // don't go back to the previous tile
+                    continue;
+                }
+            }
+
+            next = connection.?;
+            break;
         }
-        std.debug.print("\n", .{});
+
+        std.debug.assert(next.col != PipeGrid.Position.INVALID.col);
+        std.debug.assert(next.row != PipeGrid.Position.INVALID.row);
+
+        if (next.row == grid.start_pos.row and next.col == grid.start_pos.col) {
+            break;
+        }
+
+        move_count += 1;
+        prev_pos = cur_pos;
+        cur_pos = next;
+        connections = grid.connectionsAt(cur_pos);
     }
-    std.debug.print("start:({any})\n", .{grid.start_pos});
-    var result: usize = 0;
-    return result;
+
+    std.debug.assert(move_count != std.math.maxInt(u42));
+
+    return (move_count / 2) + (move_count % 2);
 }
 
 const PipeGrid = struct {
@@ -76,14 +104,14 @@ const PipeGrid = struct {
             rows += 1;
         }
 
-        const result = Self{
+        std.debug.assert('S' == data[start_pos.col + (start_pos.row * (cols + 1))]);
+
+        return Self{
             .data = data,
             .rows = rows,
             .cols = cols,
             .start_pos = start_pos,
         };
-        std.debug.assert(result.tileAt(start_pos) == 'S');
-        return result;
     }
 
     pub fn tileAt(self: *const Self, pos: Position) u8 {
@@ -91,6 +119,102 @@ const PipeGrid = struct {
         std.debug.assert(pos.row < self.rows);
         const idx = pos.col + (pos.row * (self.cols + 1));
         return self.data[idx];
+    }
+
+    pub fn connectionsStart(self: *const Self) [2]?Position {
+        var idx: usize = 0;
+        var connections: [2]?Position = [_]?Position{null} ** 2;
+        const start_pos = self.start_pos;
+
+        // Identify the adjacent tiles that are connection candidates.
+        var candidates: [4]?Position = [_]?Position{null} ** 4;
+        if (start_pos.row > 0) { // above
+            candidates[0] = Position{ .row = start_pos.row - 1, .col = start_pos.col };
+        }
+        if (start_pos.row + 1 < self.rows) { // below
+            candidates[1] = Position{ .row = start_pos.row + 1, .col = start_pos.col };
+        }
+        if (start_pos.col > 0) { // left
+            candidates[2] = Position{ .row = start_pos.row, .col = start_pos.col - 1 };
+        }
+        if (start_pos.col + 1 < self.cols) { // right
+            candidates[3] = Position{ .row = start_pos.row, .col = start_pos.col + 1 };
+        }
+
+        for (candidates) |candidate| {
+            const next = candidate orelse continue;
+            for (self.connectionsAt(next)) |connection| {
+                const pos = connection orelse continue;
+                if (pos.col == start_pos.col and pos.row == start_pos.row) {
+                    connections[idx] = next;
+                    idx += 1;
+                }
+            }
+        }
+
+        std.debug.assert(idx == connections.len);
+
+        return connections;
+    }
+
+    pub fn connectionsAt(self: *const Self, pos: Position) [2]?Position {
+        var connections: [2]?Position = [_]?Position{null} ** 2;
+        const ch = self.tileAt(pos);
+        std.debug.assert(ch != 'S');
+        switch (ch) {
+            '|' => {
+                if (pos.row > 0) { // above
+                    connections[0] = Position{ .row = pos.row - 1, .col = pos.col };
+                }
+                if (pos.row + 1 < self.rows) { // below
+                    connections[1] = Position{ .row = pos.row + 1, .col = pos.col };
+                }
+            },
+            '-' => {
+                if (pos.col > 0) { // left
+                    connections[0] = Position{ .row = pos.row, .col = pos.col - 1 };
+                }
+                if (pos.col + 1 < self.cols) { // right
+                    connections[1] = Position{ .row = pos.row, .col = pos.col + 1 };
+                }
+            },
+            'L' => {
+                if (pos.row > 0) { // above
+                    connections[0] = Position{ .row = pos.row - 1, .col = pos.col };
+                }
+                if (pos.col + 1 < self.cols) { // right
+                    connections[1] = Position{ .row = pos.row, .col = pos.col + 1 };
+                }
+            },
+            'J' => {
+                if (pos.row > 0) { // above
+                    connections[0] = Position{ .row = pos.row - 1, .col = pos.col };
+                }
+                if (pos.col > 0) { // left
+                    connections[1] = Position{ .row = pos.row, .col = pos.col - 1 };
+                }
+            },
+            '7' => {
+                if (pos.col > 0) { // left
+                    connections[0] = Position{ .row = pos.row, .col = pos.col - 1 };
+                }
+                if (pos.row + 1 < self.rows) { // down
+                    connections[1] = Position{ .row = pos.row + 1, .col = pos.col };
+                }
+            },
+            'F' => {
+                if (pos.row + 1 < self.rows) { // down
+                    connections[0] = Position{ .row = pos.row + 1, .col = pos.col };
+                }
+                if (pos.col + 1 < self.cols) { // right
+                    connections[1] = Position{ .row = pos.row, .col = pos.col + 1 };
+                }
+            },
+            '.' => {}, // no connections
+            'S' => unreachable, // don't expect start tile
+            else => unreachable,
+        }
+        return connections;
     }
 };
 
