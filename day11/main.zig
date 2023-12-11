@@ -1,8 +1,8 @@
 const std = @import("std");
 
-fn part_1(comptime input: []const u8) !usize {
+fn solve(comptime input: []const u8, expand_factor: usize) usize {
     var grid = Grid(input.len).init(input);
-    grid.expand();
+    grid.expand(expand_factor);
 
     var total_distance: usize = 0;
     for (0..input.len) |idx_1| {
@@ -23,8 +23,8 @@ pub fn Grid(comptime N: usize) type {
         cols: usize,
         rows: usize,
         galaxies: std.StaticBitSet(N),
-        horiz_cost: [N]u2 = [_]u2{1} ** N,
-        vert_cost: [N]u2 = [_]u2{1} ** N,
+        horiz_cost: [N]u64 = [_]u64{1} ** N,
+        vert_cost: [N]u64 = [_]u64{1} ** N,
 
         pub fn init(data: []const u8) Self {
             std.debug.assert(data.len <= N);
@@ -85,12 +85,12 @@ pub fn Grid(comptime N: usize) type {
             return true;
         }
 
-        pub fn expand(self: *Self) void {
+        pub fn expand(self: *Self, factor: usize) void {
             for (0..self.rows) |row| {
                 if (!self.rowIsEmpty(row)) continue;
                 for (0..self.cols) |col| {
                     const idx = self.getIndex(col, row);
-                    self.vert_cost[idx] = 2;
+                    self.vert_cost[idx] *= factor;
                 }
             }
 
@@ -98,7 +98,7 @@ pub fn Grid(comptime N: usize) type {
                 if (!self.colIsEmpty(col)) continue;
                 for (0..self.rows) |row| {
                     const idx = self.getIndex(col, row);
-                    self.horiz_cost[idx] = 2;
+                    self.horiz_cost[idx] *= factor;
                 }
             }
         }
@@ -144,8 +144,14 @@ pub fn Grid(comptime N: usize) type {
 
 pub fn main() !void {
     const input = @embedFile("./input.txt");
-    const result = try part_1(input);
-    std.debug.print("part 1 result: {}\n", .{result});
+    {
+        const result = solve(input, 2);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = solve(input, 1000000);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
@@ -164,5 +170,10 @@ const EXAMPLE_INPUT =
 ;
 
 test "part 1 example input" {
-    try testing.expectEqual(part_1(EXAMPLE_INPUT), 374);
+    try testing.expectEqual(solve(EXAMPLE_INPUT, 2), 374);
+}
+
+test "part 2 example input" {
+    try testing.expectEqual(solve(EXAMPLE_INPUT, 10), 1030);
+    try testing.expectEqual(solve(EXAMPLE_INPUT, 100), 8410);
 }
