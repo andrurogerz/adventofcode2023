@@ -51,11 +51,6 @@ pub fn Grid(comptime N: usize) type {
                 }
             }
 
-            if (data[N - 1] != '\n') {
-                // Account for input that does not end in a newline.
-                rows += 1;
-            }
-
             return Self{
                 .cols = cols,
                 .rows = rows,
@@ -167,6 +162,7 @@ const EXAMPLE_INPUT =
     \\..........
     \\.......#..
     \\#...#.....
+    \\
 ;
 
 test "part 1 example input" {
