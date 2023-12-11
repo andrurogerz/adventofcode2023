@@ -1,45 +1,75 @@
 const std = @import("std");
 
-fn part_1(comptime input: []const u8) !i128 {
+fn part_1(comptime input: []const u8) !usize {
     const Grid = PipeGrid(input.len);
-    const grid = Grid.init(input[0..].*);
+    var grid = Grid.init(input[0..].*);
+    const move_count = grid.countLoop();
+    return (move_count / 2) + (move_count % 2);
+}
 
-    var move_count: usize = 0;
-    var prev_pos: ?PipeGrid(input.len).Position = null;
-    var cur_pos = grid.start_pos;
-    var connections = grid.connectionsStart();
+fn part_2(comptime input: []const u8) !usize {
+    const Grid = PipeGrid(input.len);
+    var grid = Grid.init(input[0..].*);
+    _ = grid.countLoop();
+    grid.fixStartTile();
 
-    while (move_count < std.math.maxInt(u24)) {
-        var next: PipeGrid(input.len).Position = PipeGrid(input.len).Position.INVALID;
-        for (connections) |connection| {
-            std.debug.assert(connection != null);
-            if (prev_pos) |prev| {
-                if (connection.?.row == prev.row and connection.?.col == prev.col) {
-                    // don't go back to the previous tile
-                    continue;
+    var inside_count: usize = 0;
+    for (0..grid.rows) |row| {
+        var is_inside = false;
+        var run_start: u8 = 0;
+        var run_count: usize = 0;
+        for (0..grid.cols) |col| {
+            const pos = Grid.Position{ .row = row, .col = col };
+            if (!grid.wasVisited(pos)) {
+                // Have not previously seen this node, so it is either inside
+                // or outside the loop.
+                if (is_inside) {
+                    run_count += 1;
                 }
+                continue;
             }
 
-            next = connection.?;
-            break;
+            const tile = grid.tileAt(pos);
+            switch (tile) {
+                'L' => { // start of horizontal run L-----J or L-----7
+                    std.debug.assert(run_start == 0);
+                    run_start = 'L';
+                },
+                'F' => { // start of horizontal run F-----7 or F-----J
+                    std.debug.assert(run_start == 0);
+                    run_start = 'F';
+                },
+                '-' => {}, // continuation of horizontal run
+                'J' => { // end of horizontal run L-----J or F-----J
+                    std.debug.assert(run_start == 'F' or run_start == 'L');
+                    if (run_start == 'F') { // F----J
+                        is_inside = !is_inside;
+                        inside_count += run_count;
+                        run_count = 0;
+                    } // else L----J
+                    run_start = 0;
+                },
+                '7' => { // end of horizontal run L-----7 or F-----7
+                    std.debug.assert(run_start == 'F' or run_start == 'L');
+                    if (run_start == 'L') { // 'L----7'
+                        is_inside = !is_inside;
+                        inside_count += run_count;
+                        run_count = 0;
+                    } // else F----7
+                    run_start = 0;
+                },
+                '|' => { // straight-forward wall
+                    std.debug.assert(run_start == 0);
+                    is_inside = !is_inside;
+                    inside_count += run_count;
+                    run_count = 0;
+                },
+                else => unreachable,
+            }
         }
-
-        std.debug.assert(next.col != PipeGrid(input.len).Position.INVALID.col);
-        std.debug.assert(next.row != PipeGrid(input.len).Position.INVALID.row);
-
-        if (next.row == grid.start_pos.row and next.col == grid.start_pos.col) {
-            break;
-        }
-
-        move_count += 1;
-        prev_pos = cur_pos;
-        cur_pos = next;
-        connections = grid.connectionsAt(cur_pos);
     }
 
-    std.debug.assert(move_count != std.math.maxInt(u42));
-
-    return (move_count / 2) + (move_count % 2);
+    return inside_count;
 }
 
 pub fn PipeGrid(comptime N: usize) type {
@@ -50,6 +80,7 @@ pub fn PipeGrid(comptime N: usize) type {
         rows: usize,
         cols: usize,
         start_pos: Position,
+        visited: PositionSet,
 
         pub const Position = struct {
             const INVALID = @This(){
@@ -58,6 +89,34 @@ pub fn PipeGrid(comptime N: usize) type {
             };
             row: usize,
             col: usize,
+        };
+
+        pub const PositionSet = struct {
+            bit_set: std.StaticBitSet(N),
+            rows: usize,
+            cols: usize,
+
+            pub fn init(rows: usize, cols: usize) @This() {
+                return @This(){
+                    .bit_set = std.StaticBitSet(N).initEmpty(),
+                    .rows = rows,
+                    .cols = cols,
+                };
+            }
+
+            pub fn set(self: *@This(), pos: Position) void {
+                std.debug.assert(pos.col < self.cols);
+                std.debug.assert(pos.row < self.rows);
+                const idx = pos.col + (pos.row * (self.cols + 1));
+                self.bit_set.set(idx);
+            }
+
+            pub fn isSet(self: *const @This(), pos: Position) bool {
+                std.debug.assert(pos.col < self.cols);
+                std.debug.assert(pos.row < self.rows);
+                const idx = pos.col + (pos.row * (self.cols + 1));
+                return self.bit_set.isSet(idx);
+            }
         };
 
         pub fn init(data: [N]u8) Self {
@@ -113,7 +172,96 @@ pub fn PipeGrid(comptime N: usize) type {
                 .rows = rows,
                 .cols = cols,
                 .start_pos = start_pos,
+                .visited = PositionSet.init(rows, cols),
             };
+        }
+
+        fn fixStartTile(self: *Self) void {
+            const connections = self.connectionsStart();
+            std.debug.assert(connections[0] != null);
+            std.debug.assert(connections[1] != null);
+
+            const start_pos = self.start_pos;
+
+            var connected_up = false;
+            var connected_down = false;
+            var connected_left = false;
+            var connected_right = false;
+            for (connections) |connection| {
+                const pos = connection.?;
+                if (pos.row == start_pos.row) {
+                    if (pos.col + 1 == start_pos.col) {
+                        connected_left = true;
+                    }
+
+                    if (pos.col == start_pos.col + 1) {
+                        connected_right = true;
+                    }
+                }
+                if (pos.col == start_pos.col) {
+                    if (pos.row + 1 == start_pos.row) {
+                        connected_up = true;
+                    }
+
+                    if (pos.row == start_pos.row + 1) {
+                        connected_down = true;
+                    }
+                }
+            }
+
+            if (connected_up and connected_down) {
+                self.setTileAt(start_pos, '|');
+            } else if (connected_left and connected_right) {
+                self.setTileAt(start_pos, '-');
+            } else if (connected_up and connected_left) {
+                self.setTileAt(start_pos, 'J');
+            } else if (connected_up and connected_right) {
+                self.setTileAt(start_pos, 'L');
+            } else if (connected_down and connected_left) {
+                self.setTileAt(start_pos, '7');
+            } else if (connected_down and connected_right) {
+                self.setTileAt(start_pos, 'F');
+            }
+        }
+
+        fn countLoop(self: *Self) usize {
+            var move_count: usize = 0;
+            var prev_pos: ?Position = null;
+            var cur_pos = self.start_pos;
+            var connections = self.connectionsStart();
+
+            while (move_count < std.math.maxInt(u24)) {
+                self.visit(cur_pos);
+                var next: Position = Position.INVALID;
+                for (connections) |connection| {
+                    std.debug.assert(connection != null);
+                    if (prev_pos) |prev| {
+                        if (connection.?.row == prev.row and connection.?.col == prev.col) {
+                            // don't go back to the previous tile
+                            continue;
+                        }
+                    }
+
+                    next = connection.?;
+                    break;
+                }
+
+                std.debug.assert(next.col != Position.INVALID.col);
+                std.debug.assert(next.row != Position.INVALID.row);
+
+                if (next.row == self.start_pos.row and next.col == self.start_pos.col) {
+                    break;
+                }
+
+                move_count += 1;
+                prev_pos = cur_pos;
+                cur_pos = next;
+                connections = self.connectionsAt(cur_pos);
+            }
+
+            std.debug.assert(move_count != std.math.maxInt(u42));
+
+            return move_count;
         }
 
         pub fn tileAt(self: *const Self, pos: Position) u8 {
@@ -128,6 +276,14 @@ pub fn PipeGrid(comptime N: usize) type {
             std.debug.assert(pos.row < self.rows);
             const idx = pos.col + (pos.row * (self.cols + 1));
             self.data[idx] = ch;
+        }
+
+        pub fn visit(self: *Self, pos: Position) void {
+            self.visited.set(pos);
+        }
+
+        pub fn wasVisited(self: *const Self, pos: Position) bool {
+            return self.visited.isSet(pos);
         }
 
         pub fn connectionsStart(self: *const Self) [2]?Position {
@@ -230,31 +386,98 @@ pub fn PipeGrid(comptime N: usize) type {
 
 pub fn main() !void {
     const input = @embedFile("./input.txt");
-    const result = try part_1(input);
-    std.debug.print("part 1 result: {}\n", .{result});
+    {
+        const result = try part_1(input);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = try part_2(input);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
-const EXAMPLE_INPUT_1 =
-    \\-L|F7
-    \\7S-7|
-    \\L|7||
-    \\-L-J|
-    \\L|-JF
-;
-
-const EXAMPLE_INPUT_2 =
-    \\7-F7-
-    \\.FJ|7
-    \\SJLL7
-    \\|F--J
-    \\LJ.LJ
-;
 
 test "part 1 example input 1" {
-    try testing.expectEqual(part_1(EXAMPLE_INPUT_1), 4);
+    const EXAMPLE_INPUT =
+        \\-L|F7
+        \\7S-7|
+        \\L|7||
+        \\-L-J|
+        \\L|-JF
+    ;
+    try testing.expectEqual(part_1(EXAMPLE_INPUT), 4);
+}
+
+test "part 1 example input 2" {
+    const EXAMPLE_INPUT =
+        \\7-F7-
+        \\.FJ|7
+        \\SJLL7
+        \\|F--J
+        \\LJ.LJ
+    ;
+    try testing.expectEqual(part_1(EXAMPLE_INPUT), 8);
+}
+
+test "part 2 example input 1" {
+    const EXAMPLE_INPUT =
+        \\...........
+        \\.S-------7.
+        \\.|F-----7|.
+        \\.||.....||.
+        \\.||.....||.
+        \\.|L-7.F-J|.
+        \\.|..|.|..|.
+        \\.L--J.L--J.
+        \\...........
+    ;
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 4);
 }
 
 test "part 2 example input 2" {
-    try testing.expectEqual(part_1(EXAMPLE_INPUT_2), 8);
+    const EXAMPLE_INPUT =
+        \\..........
+        \\.S------7.
+        \\.|F----7|.
+        \\.||....||.
+        \\.||....||.
+        \\.|L-7F-J|.
+        \\.|..||..|.
+        \\.L--JL--J.
+        \\..........
+    ;
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 4);
+}
+
+test "part 2 example input 3" {
+    const EXAMPLE_INPUT =
+        \\.F----7F7F7F7F-7....
+        \\.|F--7||||||||FJ....
+        \\.||.FJ||||||||L7....
+        \\FJL7L7LJLJ||LJ.L-7..
+        \\L--J.L7...LJS7F-7L7.
+        \\....F-J..F7FJ|L7L7L7
+        \\....L7.F7||L7|.L7L7|
+        \\.....|FJLJ|FJ|F7|.LJ
+        \\....FJL-7.||.||||...
+        \\....L---J.LJ.LJLJ...
+    ;
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 8);
+}
+
+test "part 2 example input 4" {
+    const EXAMPLE_INPUT =
+        \\FF7FSF7F7F7F7F7F---7
+        \\L|LJ||||||||||||F--J
+        \\FL-7LJLJ||||||LJL-77
+        \\F--JF--7||LJLJ7F7FJ-
+        \\L---JF-JLJ.||-FJLJJ7
+        \\|F|F-JF---7F7-L7L|7|
+        \\|FFJF7L7F-JF7|JL---7
+        \\7-L-JL7||F7|L7F-7F7|
+        \\L.L7LFJ|||||FJL7||LJ
+        \\L7JLJL-JLJLJL--JLJ.L
+    ;
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 10);
 }
