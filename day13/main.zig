@@ -1,48 +1,62 @@
 const std = @import("std");
 
 fn part_1(comptime input: []const u8) usize {
+    return solve(input, 0);
+}
+
+fn part_2(comptime input: []const u8) usize {
+    return solve(input, 1);
+}
+
+fn solve(comptime input: []const u8, comptime flip_count: usize) usize {
     var result: usize = 0;
     var maps = std.mem.tokenizeSequence(u8, input, "\n\n");
     while (maps.next()) |map_str| {
+        var reflection_count: usize = 0;
         const map = Map.init(map_str);
         for (0..map.rows - 1) |row| {
             const next_row = row + 1;
-            var reflect = true;
+            var diffs: usize = 0;
             for (0..map.rows) |offset| {
                 if ((offset > row) or (next_row + offset >= map.rows)) {
                     break;
                 }
 
-                if (!map.eqlRows(row - offset, next_row + offset)) {
-                    reflect = false;
+                diffs += map.diffRows(row - offset, next_row + offset);
+                if (diffs > flip_count) {
                     break;
                 }
             }
 
-            if (reflect) {
+            if (diffs == flip_count) {
+                reflection_count += 1;
                 result += next_row * 100;
             }
         }
 
         for (0..map.cols - 1) |col| {
             const next_col = col + 1;
-            var reflect = true;
+            var diffs: usize = 0;
             for (0..map.cols) |offset| {
                 if ((offset > col) or (next_col + offset >= map.cols)) {
                     break;
                 }
 
-                if (!map.eqlCols(col - offset, next_col + offset)) {
-                    reflect = false;
+                diffs += map.diffCols(col - offset, next_col + offset);
+                if (diffs > flip_count) {
                     break;
                 }
             }
 
-            if (reflect) {
+            if (diffs == flip_count) {
+                reflection_count += 1;
                 result += next_col;
             }
         }
+
+        std.debug.assert(reflection_count == 1);
     }
+
     return result;
 }
 
@@ -91,29 +105,37 @@ const Map = struct {
         return self.map_str[pos];
     }
 
-    pub fn eqlRows(self: *const Self, row_1: usize, row_2: usize) bool {
+    pub fn diffRows(self: *const Self, row_1: usize, row_2: usize) usize {
+        var diff_count: usize = 0;
         for (0..self.cols) |col| {
             if (self.get(row_1, col) != self.get(row_2, col)) {
-                return false;
+                diff_count += 1;
             }
         }
-        return true;
+        return diff_count;
     }
 
-    pub fn eqlCols(self: *const Self, col_1: usize, col_2: usize) bool {
+    pub fn diffCols(self: *const Self, col_1: usize, col_2: usize) usize {
+        var diff_count: usize = 0;
         for (0..self.rows) |row| {
             if (self.get(row, col_1) != self.get(row, col_2)) {
-                return false;
+                diff_count += 1;
             }
         }
-        return true;
+        return diff_count;
     }
 };
 
 pub fn main() !void {
     const input = @embedFile("./input.txt");
-    const result = part_1(input);
-    std.debug.print("part 1 result: {}\n", .{result});
+    {
+        const result = part_1(input);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = part_2(input);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
@@ -139,4 +161,8 @@ const EXAMPLE_INPUT =
 
 test "part 1 example input" {
     try testing.expectEqual(part_1(EXAMPLE_INPUT), 405);
+}
+
+test "part 2 example input" {
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 400);
 }
