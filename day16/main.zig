@@ -10,6 +10,39 @@ fn part_1(comptime input: []const u8) usize {
     return map.energized.count();
 }
 
+fn part_2(comptime input: []const u8) usize {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var map = Map(input.len).init(allocator, input);
+    defer map.deinit();
+
+    var max: usize = 0;
+
+    for (0..map.cols) |col| {
+        map.reset();
+        map.energize(.{ .row = 0, .col = @intCast(col) }, .{ .dx = 0, .dy = 1 });
+        max = @max(max, map.energized.count());
+
+        map.reset();
+        map.energize(.{ .row = @intCast(map.rows - 1), .col = @intCast(col) }, .{ .dx = 0, .dy = -1 });
+        max = @max(max, map.energized.count());
+    }
+
+    for (0..map.rows) |row| {
+        map.reset();
+        map.energize(.{ .row = @intCast(row), .col = 0 }, .{ .dx = 1, .dy = 0 });
+        max = @max(max, map.energized.count());
+
+        map.reset();
+        map.energize(.{ .row = @intCast(row), .col = @intCast(map.cols - 1) }, .{ .dx = -1, .dy = 0 });
+        max = @max(max, map.energized.count());
+    }
+
+    return max;
+}
+
 fn Map(comptime N: usize) type {
     return struct {
         const Self = @This();
@@ -73,6 +106,11 @@ fn Map(comptime N: usize) type {
 
         pub fn deinit(self: *Self) void {
             self.visited_set.deinit();
+        }
+
+        pub fn reset(self: *Self) void {
+            self.visited_set.clearAndFree();
+            self.energized = std.StaticBitSet(N).initEmpty();
         }
 
         pub fn energize(self: *Self, pos: Position, vel: Velocity) void {
@@ -153,8 +191,14 @@ fn Map(comptime N: usize) type {
 
 pub fn main() !void {
     const input = @embedFile("./input.txt");
-    const result = part_1(input);
-    std.debug.print("part 1 result: {}\n", .{result});
+    {
+        const result = part_1(input);
+        std.debug.print("part 1 result: {}\n", .{result});
+    }
+    {
+        const result = part_2(input);
+        std.debug.print("part 2 result: {}\n", .{result});
+    }
 }
 
 const testing = std.testing;
@@ -175,4 +219,8 @@ const EXAMPLE_INPUT =
 
 test "part 1 example input" {
     try testing.expectEqual(part_1(EXAMPLE_INPUT), 46);
+}
+
+test "part 2 example input" {
+    try testing.expectEqual(part_2(EXAMPLE_INPUT), 51);
 }
